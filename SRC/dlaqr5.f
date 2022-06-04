@@ -70,9 +70,9 @@
 *>             matrix entries.
 *>        = 1: DLAQR5 accumulates reflections and uses matrix-matrix
 *>             multiply to update the far-from-diagonal matrix entries.
-*>        = 2: Same as KACC22 = 1. This option used to enable exploiting
-*>             the 2-by-2 structure during matrix multiplications, but
-*>             this is no longer supported.
+*>        = 2: This option updates far-from-diagonal entries by splitting
+*>             the matrix into a 1-by-3 structure (rather than a 2-by-2
+*>             proposed in the 2002 paper).
 *> \endverbatim
 *>
 *> \param[in] N
@@ -288,11 +288,11 @@
       DOUBLE PRECISION   ALPHA, BETA, H11, H12, H21, H22, REFSUM,
      $                   SAFMAX, SAFMIN, SCL, SMLNUM, SWAP, T1, T2,
      $                   T3, TST1, TST2, ULP
-      INTEGER            I, I2, I4, INCOL, J, JBOT, JCOL, JLEN,
+      INTEGER            I, I2, I4, INCOL, J, J2, JBOT, JCOL, JLEN,
      $                   JROW, JTOP, K, K1, KDU, KMS, KRCOL,
      $                   M, M22, MBOT, MTOP, NBMPS, NDCOL,
      $                   NS, NU
-      LOGICAL            ACCUM, BMP22
+      LOGICAL            ACCUM, BLK22, BMP22
 *     ..
 *     .. External Functions ..
       DOUBLE PRECISION   DLAMCH
@@ -361,6 +361,12 @@
 *     .    entries ? ====
 *
       ACCUM = ( KACC22.EQ.1 ) .OR. ( KACC22.EQ.2 )
+*
+*     ==== If so, exploit the block structure? The block structure only
+*     .    pays off for sufficiently large values of NS. This is a
+*     .    conservative choice.
+*
+      BLK22 = ( NS.GE.128 ) .AND. ( KACC22.EQ.2 )
 *
 *     ==== clear trash ====
 *
@@ -789,40 +795,117 @@
             END IF
             K1 = MAX( 1, KTOP-INCOL )
             NU = ( KDU-MAX( 0, NDCOL-KBOT ) ) - K1 + 1
+            IF( ( .NOT.BLK22 ) .OR. ( INCOL.LT.KTOP ) .OR.
+     $          ( NDCOL.GT.KBOT ) .OR. ( NU.LE.KDU ) ) THEN
 *
-*           ==== Horizontal Multiply ====
+*              ==== Updates not exploiting the block
+*              .    structure of U.
 *
-            DO 150 JCOL = MIN( NDCOL, KBOT ) + 1, JBOT, NH
-               JLEN = MIN( NH, JBOT-JCOL+1 )
-               CALL DGEMM( 'C', 'N', NU, JLEN, NU, ONE, U( K1, K1 ),
+*
+*              ==== Horizontal Multiply ====
+*
+               DO 150 JCOL = MIN( NDCOL, KBOT ) + 1, JBOT, NH
+                  JLEN = MIN( NH, JBOT-JCOL+1 )
+                  CALL DGEMM( 'C', 'N', NU, JLEN, NU, ONE, U( K1, K1 ),
      $                        LDU, H( INCOL+K1, JCOL ), LDH, ZERO, WH,
      $                        LDWH )
-               CALL DLACPY( 'ALL', NU, JLEN, WH, LDWH,
+                  CALL DLACPY( 'ALL', NU, JLEN, WH, LDWH,
      $                         H( INCOL+K1, JCOL ), LDH )
-  150       CONTINUE
+  150          CONTINUE
 *
-*           ==== Vertical multiply ====
+*              ==== Vertical multiply ====
 *
-            DO 160 JROW = JTOP, MAX( KTOP, INCOL ) - 1, NV
-               JLEN = MIN( NV, MAX( KTOP, INCOL )-JROW )
-               CALL DGEMM( 'N', 'N', JLEN, NU, NU, ONE,
-     $                     H( JROW, INCOL+K1 ), LDH, U( K1, K1 ),
-     $                     LDU, ZERO, WV, LDWV )
-               CALL DLACPY( 'ALL', JLEN, NU, WV, LDWV,
-     $                      H( JROW, INCOL+K1 ), LDH )
-  160       CONTINUE
-*
-*           ==== Z multiply (also vertical) ====
-*
-            IF( WANTZ ) THEN
-               DO 170 JROW = ILOZ, IHIZ, NV
-                  JLEN = MIN( NV, IHIZ-JROW+1 )
+               DO 160 JROW = JTOP, MAX( KTOP, INCOL ) - 1, NV
+                  JLEN = MIN( NV, MAX( KTOP, INCOL )-JROW )
                   CALL DGEMM( 'N', 'N', JLEN, NU, NU, ONE,
-     $                        Z( JROW, INCOL+K1 ), LDZ, U( K1, K1 ),
+     $                        H( JROW, INCOL+K1 ), LDH, U( K1, K1 ),
      $                        LDU, ZERO, WV, LDWV )
                   CALL DLACPY( 'ALL', JLEN, NU, WV, LDWV,
-     $                         Z( JROW, INCOL+K1 ), LDZ )
-  170          CONTINUE
+     $                         H( JROW, INCOL+K1 ), LDH )
+  160          CONTINUE
+*
+*              ==== Z multiply (also vertical) ====
+*
+               IF( WANTZ ) THEN
+                  DO 170 JROW = ILOZ, IHIZ, NV
+                     JLEN = MIN( NV, IHIZ-JROW+1 )
+                     CALL DGEMM( 'N', 'N', JLEN, NU, NU, ONE,
+     $                           Z( JROW, INCOL+K1 ), LDZ, U( K1, K1 ),
+     $                           LDU, ZERO, WV, LDWV )
+                     CALL DLACPY( 'ALL', JLEN, NU, WV, LDWV,
+     $                            Z( JROW, INCOL+K1 ), LDZ )
+  170             CONTINUE
+                END IF
+            ELSE
+*
+*           === Updates exploit the block structure of U
+*           .   Partition U into a 1x3 block matrix.
+*
+               J2 = MAX(1, KDU / 4 - 1)
+               I2 = KDU / 4 - 1
+               I4 = 3 * KDU / 4 + 1
+*
+*              ==== Horizontal Multiply ====
+*
+               DO 190 JCOL = MIN( NDCOL, KBOT ) + 1, JBOT, NH
+                  JLEN = MIN( NH, JBOT-JCOL+1 )
+                  CALL DLACPY( 'ALL', NU, JLEN, H( INCOL+K1, JCOL ),
+     $                         LDH, WH, LDWH )
+                  CALL DGEMM( 'C', 'N', NU/4, JLEN,
+     $                        3*NU/4, ONE, U( K1, K1 ), LDU,
+     $                        WH, LDWH, ZERO,
+     $                        H( INCOL+K1, JCOL ), LDH )
+                  CALL DGEMM( 'C', 'N', NU/2, JLEN,
+     $                        NU, ONE, U( K1, K1+NU/4 ), LDU,
+     $                        WH, LDWH, ZERO,
+     $                        H( INCOL+K1+NU/4, JCOL ), LDH )
+                  CALL DGEMM( 'C', 'N', NU/4, JLEN,
+     $                        NU-I2, ONE,U( K1+I2, K1+3*NU/4),
+     $                        LDU, WH(I2+1,1), LDWH, ZERO,
+     $                        H( INCOL+K1+3*NU/4, JCOL ), LDH )
+  190          CONTINUE
+*
+*              ==== Vertical multiply ====
+*
+               DO 200 JROW = JTOP, MAX( KTOP, INCOL ) - 1, NV
+                  JLEN = MIN( NV, MAX( KTOP, INCOL )-JROW )
+                  CALL DLACPY( 'ALL', JLEN, NU, H( JROW, INCOL+K1 ),
+     $                         LDH, WV, LDWV )
+                  CALL DGEMM( 'N', 'N', JLEN, NU/4-1,
+     $                        3*NU/4-1, ONE, WV, LDWV,
+     $                        U( K1, K1 ), LDU, ZERO,
+     $                        H( JROW, INCOL+K1 ), LDH )
+                  CALL DGEMM( 'N', 'N', JLEN, NU/2+2, NU,
+     $                        ONE, WV, LDWV,
+     $                        U( K1, K1+I2 ), LDU, ZERO,
+     $                        H( JROW, INCOL+K1+I2 ), LDH )
+                  CALL DGEMM( 'N', 'N', JLEN, NU/4-1,
+     $                        NU-J2, ONE, WV(1,J2+1), LDWV,
+     $                        U( K1+J2, K1+I4 ), LDU, ZERO,
+     $                        H( JROW, INCOL+K1+I4 ), LDH )
+  200          CONTINUE
+*
+*              ==== Z multiply (also vertical) ====
+*
+               IF( WANTZ ) THEN
+                  DO 210 JROW = ILOZ, IHIZ, NV
+                     JLEN = MIN( NV, IHIZ-JROW+1 )
+                     CALL DLACPY( 'ALL', JLEN, NU, Z( JROW, INCOL+K1 ),
+     $                            LDZ, WV, LDWV )
+                     CALL DGEMM( 'N', 'N', JLEN, NU/4-1,
+     $                           3*NU/4-1, ONE, WV, LDWV,
+     $                           U( K1, K1 ), LDU, ZERO,
+     $                           Z( JROW, INCOL+K1 ), LDZ )
+                     CALL DGEMM( 'N', 'N', JLEN, NU/2+2, NU,
+     $                           ONE, WV, LDWV,
+     $                           U( K1, K1+I2 ), LDU, ZERO,
+     $                           Z( JROW, INCOL+K1+I2 ), LDZ )
+                     CALL DGEMM( 'N', 'N', JLEN, NU/4-1,
+     $                           NU-J2, ONE, WV(1,J2+1), LDWV,
+     $                           U( K1+J2, K1+I4 ), LDU, ZERO,
+     $                           Z( JROW, INCOL+K1+I4 ), LDZ )
+  210             CONTINUE
+                END IF
             END IF
          END IF
   180 CONTINUE
