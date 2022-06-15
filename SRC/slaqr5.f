@@ -286,8 +286,8 @@
 *     ..
 *     .. Local Scalars ..
       REAL               ALPHA, BETA, H11, H12, H21, H22, REFSUM,
-     $                   SAFMAX, SAFMIN, SCL, SMLNUM, SWAP, TST1, TST2,
-     $                   ULP
+     $                   SAFMAX, SAFMIN, SCL, SMLNUM, SWAP, T1, T2,
+     $                   T3, TST1, TST2, ULP
       INTEGER            I, I2, I4, INCOL, J, JBOT, JCOL, JLEN,
      $                   JROW, JTOP, K, K1, KDU, KMS, KRCOL,
      $                   M, M22, MBOT, MTOP, NBMPS, NDCOL,
@@ -447,11 +447,12 @@
 *              ==== Perform update from right within 
 *              .    computational window. ====
 *
+               T1 = V( 1, M22 )
+               T2 = T1*V( 2, M22 )
                DO 30 J = JTOP, MIN( KBOT, K+3 )
-                  REFSUM = V( 1, M22 )*( H( J, K+1 )+V( 2, M22 )*
-     $                     H( J, K+2 ) )
-                  H( J, K+1 ) = H( J, K+1 ) - REFSUM
-                  H( J, K+2 ) = H( J, K+2 ) - REFSUM*V( 2, M22 )
+                  REFSUM = H( J, K+1 ) + V( 2, M22 )*H( J, K+2 )
+                  H( J, K+1 ) = H( J, K+1 ) - REFSUM*T1
+                  H( J, K+2 ) = H( J, K+2 ) - REFSUM*T2
    30          CONTINUE
 *
 *              ==== Perform update from left within 
@@ -464,11 +465,12 @@
                ELSE
                   JBOT = KBOT
                END IF
+               T1 = V( 1, M22 )
+               T2 = T1*V( 2, M22 )
                DO 40 J = K+1, JBOT
-                  REFSUM = V( 1, M22 )*( H( K+1, J )+V( 2, M22 )*
-     $                     H( K+2, J ) )
-                  H( K+1, J ) = H( K+1, J ) - REFSUM
-                  H( K+2, J ) = H( K+2, J ) - REFSUM*V( 2, M22 )
+                  REFSUM = H( K+1, J ) + V( 2, M22 )*H( K+2, J )
+                  H( K+1, J ) = H( K+1, J ) - REFSUM*T1
+                  H( K+2, J ) = H( K+2, J ) - REFSUM*T2
    40          CONTINUE
 *
 *              ==== The following convergence test requires that
@@ -522,18 +524,20 @@
 *
                IF( ACCUM ) THEN
                   KMS = K - INCOL
+                  T1 = V( 1, M22 )
+                  T2 = T1*V( 2, M22 )
                   DO 50 J = MAX( 1, KTOP-INCOL ), KDU
-                     REFSUM = V( 1, M22 )*( U( J, KMS+1 )+
-     $                        V( 2, M22 )*U( J, KMS+2 ) )
-                     U( J, KMS+1 ) = U( J, KMS+1 ) - REFSUM
-                     U( J, KMS+2 ) = U( J, KMS+2 ) - REFSUM*V( 2, M22 )
+                     REFSUM = U( J, KMS+1 ) + V( 2, M22 )*U( J, KMS+2 )
+                     U( J, KMS+1 ) = U( J, KMS+1 ) - REFSUM*T1
+                     U( J, KMS+2 ) = U( J, KMS+2 ) - REFSUM*T2
   50                 CONTINUE
                ELSE IF( WANTZ ) THEN
+                  T1 = V( 1, M22 )
+                  T2 = T1*V( 2, M22 )
                   DO 60 J = ILOZ, IHIZ
-                     REFSUM = V( 1, M22 )*( Z( J, K+1 )+V( 2, M22 )*
-     $                        Z( J, K+2 ) )
-                     Z( J, K+1 ) = Z( J, K+1 ) - REFSUM
-                     Z( J, K+2 ) = Z( J, K+2 ) - REFSUM*V( 2, M22 )
+                     REFSUM = Z( J, K+1 )+V( 2, M22 )*Z( J, K+2 )
+                     Z( J, K+1 ) = Z( J, K+1 ) - REFSUM*T1
+                     Z( J, K+2 ) = Z( J, K+2 ) - REFSUM*T2
   60              CONTINUE
                END IF
             END IF
