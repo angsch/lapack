@@ -5,7 +5,6 @@
 * Online html documentation available at
 *            http://www.netlib.org/lapack/explore-html/
 *
-*> \htmlonly
 *> Download DLABRD + dependencies
 *> <a href="http://www.netlib.org/cgi-bin/netlibfiles.tgz?format=tgz&filename=/lapack/lapack_routine/dlabrd.f">
 *> [TGZ]</a>
@@ -13,7 +12,6 @@
 *> [ZIP]</a>
 *> <a href="http://www.netlib.org/cgi-bin/netlibfiles.txt?format=txt&filename=/lapack/lapack_routine/dlabrd.f">
 *> [TXT]</a>
-*> \endhtmlonly
 *
 *  Definition:
 *  ===========
@@ -266,11 +264,15 @@
 *
 *              Compute Y(i+1:n,i)
 *
-               CALL DGEMV( 'Transpose', M-I+1, N-I, ONE, A( I, I+1 ),
-     $                     LDA, A( I, I ), 1, ZERO, Y( I+1, I ), 1 )
-               CALL DGEMV( 'Transpose', M-I+1, I-1, ONE, A( I, 1 ),
-     $                     LDA,
-     $                     A( I, I ), 1, ZERO, Y( 1, I ), 1 )
+*               CALL DGEMV( 'Transpose', M-I+1, N-I, ONE, A( I, I+1 ),
+*     $                     LDA, A( I, I ), 1, ZERO, Y( I+1, I ), 1 )
+*               CALL DGEMV( 'Transpose', M-I+1, I-1, ONE, A( I, 1 ),
+*     $                     LDA,
+*     $                     A( I, I ), 1, ZERO, Y( 1, I ), 1 )
+     
+               CALL DGEMV( 'Transpose', M-I+1, N, ONE, A( I, 1 ),
+     $                      LDA, A( I, I ), 1, ZERO, Y( 1, I ), 1 )    
+     
                CALL DGEMV( 'No transpose', N-I, I-1, -ONE, Y( I+1,
      $                     1 ),
      $                     LDY, Y( 1, I ), 1, ONE, Y( I+1, I ), 1 )
